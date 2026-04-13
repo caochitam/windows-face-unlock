@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+*.dll
+*.lib
+*.exp
+*.pdb
+*.obj
+.vscode/
+.idea/
+*.log
+
+# Generated / user-specific
+credential_provider/build/
+*.npz
+embeddings.npz
+enroll/
+*.jpg
+*.png
+!docs/**/*.png
+!docs/**/*.jpg
+
+# Never commit credentials or weights
+credentials.bin
+weights/
+*.h5
+*.pth
+*.onnx

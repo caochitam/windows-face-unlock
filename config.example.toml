@@ -1,0 +1,16 @@
+# Copy this to %USERPROFILE%\.face-unlock\config.toml and edit.
+
+model_name = "ArcFace"          # DeepFace model: ArcFace, Facenet512, VGG-Face, ...
+detector_backend = "opencv"     # opencv, retinaface, mtcnn, yunet, ssd
+distance_metric = "cosine"
+threshold = 0.45                # cosine distance; lower = stricter. Tune per camera.
+anti_spoofing = true
+
+camera_index = 0
+verify_frames = 5               # frames captured per verify
+verify_required = 3             # matches needed out of verify_frames
+
+presence_interval_s = 60        # 1 minute
+presence_absent_strikes = 2     # lock after N consecutive absent ticks
+
+warmup_on_start = true

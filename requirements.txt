@@ -1,0 +1,15 @@
+deepface>=0.0.93
+opencv-python>=4.9
+numpy>=1.26
+tf-keras>=2.16
+pywin32>=306
+psutil>=5.9
+# torch is only needed for DeepFace anti-spoofing (MiniFASNet).
+# Install CPU build with:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+torch>=2.0
+torchvision>=0.15
+pystray>=0.19
+Pillow>=10.0
+tomli>=2.0 ; python_version < "3.11"
+tomli-w>=1.0
