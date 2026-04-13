@@ -32,14 +32,15 @@ if (-not (Test-Path "$home_cfg\config.toml")) {
 if ($SkipAutostart) { Write-Host "Skipping autostart registration."; return }
 
 # 3. Task Scheduler entries
+$pyw = "$root\.venv\Scripts\pythonw.exe"  # windowed (no console) variant
 function Register-LogonTask {
     param([string]$Name, [string]$Script)
-    $action  = New-ScheduledTaskAction -Execute $py -Argument "-m $Script" -WorkingDirectory $root
+    $action  = New-ScheduledTaskAction -Execute $pyw -Argument "-m $Script" -WorkingDirectory $root
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $prins   = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-    $set     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $set     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
     Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Principal $prins -Settings $set -Force | Out-Null
-    Write-Host "Registered task: $Name"
+    Write-Host "Registered task (hidden, pythonw): $Name"
 }
 
 Register-LogonTask -Name "FaceUnlock-Service"  -Script "face_service"
