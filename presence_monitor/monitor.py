@@ -86,26 +86,24 @@ class PresenceMonitor:
         self._stop.set()
 
     def _tick(self) -> None:
-        # 1. Skip if paused
+        # 1. Skip if paused from the tray
         if self._paused.is_set():
             return
 
-        # 2. Skip if workstation already idle long enough that Windows will
-        #    handle lock itself, or if we're in a remote session.
+        # 2. Skip if this is a remote session — face check doesn't make sense
+        #    when nobody is physically at the machine.
         remote, reason = is_remote_context()
         if remote:
             log.info("skip: remote context (%s)", reason)
             self._strikes = 0
             return
 
-        # 3. If user is actively using the machine (recent input), assume present.
-        idle = _get_idle_seconds()
-        if idle < self.cfg.presence_interval_s:
-            log.debug("skip: recent input (%.1fs idle)", idle)
-            self._strikes = 0
-            return
+        # NOTE: We deliberately do NOT skip based on keyboard/mouse input.
+        # The goal is pure face-based presence: if the enrolled face is not
+        # in front of the camera, lock — even if someone else is actively
+        # using the machine (stronger "walk-away" security).
 
-        # 4. Probe camera via FaceService
+        # 3. Probe camera via FaceService
         resp = _pipe_call({"cmd": "presence"}, timeout_s=20.0)
         if resp is None:
             # Service down — don't lock blindly
