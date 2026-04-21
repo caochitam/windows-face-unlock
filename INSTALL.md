@@ -47,11 +47,13 @@ New-Item -ItemType Directory -Force -Path $w | Out-Null
 curl -L -o "$w\arcface_weights.h5" https://github.com/serengil/deepface_models/releases/download/v1.0/arcface_weights.h5
 curl -L -o "$w\2.7_80x80_MiniFASNetV2.pth" https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth
 curl -L -o "$w\4_0_0_80x80_MiniFASNetV1SE.pth" https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth
-curl -L -o "$w\face_detection_yunet_2023mar.onnx" https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 ```
 
-Expected sizes: arcface 131MB, MiniFASNetV2 1.8MB, MiniFASNetV1SE 1.8MB,
-yunet 227KB.
+Expected sizes: arcface 131MB, MiniFASNetV2 1.8MB, MiniFASNetV1SE 1.8MB.
+
+The YuNet detector (used for DeepFace's detector backend AND the
+`presence_mode=detection` path) is bundled in the repo at
+`models/face_detection_yunet_2023mar.onnx` — no download needed.
 
 ## 4. Enrollment + password
 

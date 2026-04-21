@@ -11,14 +11,28 @@ Commands:
   {"cmd":"unlock"}             # verify + return credentials on success
       -> {"ok":true,"username":"...","password":"...","domain":"..."}  (on match)
       -> {"ok":false,"reason":"..."}
-  {"cmd":"presence"}           # single-frame presence probe, no enrollment compare
-      -> {"ok":true,"present":bool,"real":bool}
+  {"cmd":"presence"}           # single-frame presence probe
+      -> {"ok":true,"present":bool,"real":bool,"mode":"recognition|detection"}
+  {"cmd":"status"}             # service metadata for GUI
+      -> {"ok":true,"uptime_s":float,"config":{...},"enrollment":bool}
+  {"cmd":"reload_config"}      # re-read config.toml from disk
+      -> {"ok":true,"config":{...}}
+  {"cmd":"pause_camera","seconds":120}   # release webcam for N seconds so
+                                          # the enrollment GUI can own it
+      -> {"ok":true,"paused_until":float}
+  {"cmd":"resume_camera"}                 # clear the camera lease early
+      -> {"ok":true}
+  {"cmd":"build_enrollment"}              # (re)compute embeddings from ENROLL_DIR
+      -> {"ok":true,"count":int} | {"ok":false,"reason":str}
+  {"cmd":"shutdown"}           # stop the service cleanly (tray Quit uses this)
+      -> {"ok":true,"shutting_down":true}
 """
 from __future__ import annotations
 import json
 import logging
 import threading
 import time
+from dataclasses import asdict
 from typing import Callable
 
 import pywintypes  # type: ignore
@@ -34,6 +48,7 @@ def win32api_get_last_error() -> int:
 from .camera import Camera
 from .config import Config, LOG_PATH, PIPE_NAME
 from .credentials import load_password
+from .detector import FaceDetector
 from .recognizer import Recognizer
 
 log = logging.getLogger(__name__)
@@ -53,9 +68,19 @@ class FaceService:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.recog = Recognizer(cfg)
+        self.detector = FaceDetector()
         self._stop = threading.Event()
         self._cam_lock = threading.Lock()
         self._cam: Camera | None = None  # kept open when persistent_camera=True
+        self._started_at = time.time()
+        # When the enrollment wizard is running it needs exclusive access to
+        # the webcam. ``_camera_paused_until`` holds an epoch timestamp: probes
+        # and verify calls short-circuit until that time passes. The service
+        # also releases the persistent camera so the tray can open it.
+        self._camera_paused_until: float = 0.0
+
+    def _camera_leased_out(self) -> bool:
+        return time.time() < self._camera_paused_until
 
     def _get_camera(self) -> Camera:
         """Return the shared persistent camera, opening it if needed."""
@@ -72,6 +97,9 @@ class FaceService:
     # ---------- core ops ----------
 
     def _capture_and_verify(self) -> tuple[bool, float, bool]:
+        if self._camera_leased_out():
+            log.info("verify skipped: camera leased out to enrollment")
+            return False, 1.0, False
         matches = 0
         best = 1.0
         real_seen = False
@@ -107,6 +135,22 @@ class FaceService:
         return False, best, real_seen
 
     def _presence_probe(self) -> tuple[bool, bool]:
+        """(present, real) — semantics depend on config.presence_mode.
+
+        recognition: ``present`` = enrolled face detected AND passes anti-spoofing.
+        detection:   ``present`` = *any* face detected by YuNet. ``real`` is
+                     reported as True (anti-spoofing not evaluated).
+        """
+        if self._camera_leased_out():
+            log.info("presence probe skipped: camera leased out to enrollment")
+            # Return (True, True) so the monitor doesn't rack up strikes
+            # while the user is enrolling their face.
+            return True, True
+        if self.cfg.presence_mode == "detection":
+            return self._presence_probe_detection()
+        return self._presence_probe_recognition()
+
+    def _presence_probe_recognition(self) -> tuple[bool, bool]:
         with self._cam_lock:
             cam = self._get_camera() if self.cfg.persistent_camera else Camera(
                 self.cfg.camera_index, self.cfg.camera_warmup_frames
@@ -131,12 +175,98 @@ class FaceService:
                     cam.close()
         return False, False
 
+    def _presence_probe_detection(self) -> tuple[bool, bool]:
+        with self._cam_lock:
+            cam = self._get_camera() if self.cfg.persistent_camera else Camera(
+                self.cfg.camera_index, self.cfg.camera_warmup_frames
+            )
+            if not self.cfg.persistent_camera:
+                cam.open()
+            try:
+                for _ in range(2):
+                    cam.read()
+                for _ in range(5):
+                    frame = cam.read()
+                    if frame is None:
+                        continue
+                    try:
+                        if self.detector.has_face(frame):
+                            return True, True
+                    except Exception as e:
+                        log.warning("detector error: %s", e)
+                        continue
+            finally:
+                if not self.cfg.persistent_camera:
+                    cam.close()
+        return False, True
+
     # ---------- pipe ----------
+
+    def _status(self) -> dict:
+        from .config import EMBED_PATH
+        return {
+            "ok": True,
+            "uptime_s": time.time() - self._started_at,
+            "config": asdict(self.cfg),
+            "enrollment": EMBED_PATH.exists(),
+        }
+
+    def _reload_config(self) -> dict:
+        new_cfg = Config.load()
+        try:
+            new_cfg.validate()
+        except ValueError as e:
+            return {"ok": False, "reason": f"invalid-config: {e}"}
+        old_index = self.cfg.camera_index
+        old_persistent = self.cfg.persistent_camera
+        self.cfg = new_cfg
+        self.recog.cfg = new_cfg
+        # Reset camera if camera-affecting settings changed
+        if new_cfg.camera_index != old_index or new_cfg.persistent_camera != old_persistent:
+            with self._cam_lock:
+                self._release_camera()
+        return {"ok": True, "config": asdict(new_cfg)}
 
     def _handle(self, req: dict) -> dict:
         cmd = req.get("cmd")
         if cmd == "ping":
             return {"ok": True, "pong": True}
+
+        if cmd == "status":
+            return self._status()
+
+        if cmd == "reload_config":
+            return self._reload_config()
+
+        if cmd == "shutdown":
+            log.info("shutdown requested via pipe")
+            self._stop.set()
+            return {"ok": True, "shutting_down": True}
+
+        if cmd == "pause_camera":
+            # Release the webcam and ignore probe/verify for the requested
+            # number of seconds so the enrollment wizard can own it.
+            seconds = float(req.get("seconds", 120))
+            self._camera_paused_until = time.time() + max(5.0, seconds)
+            with self._cam_lock:
+                self._release_camera()
+            log.info("camera leased out for %.0fs (enrollment)", seconds)
+            return {"ok": True, "paused_until": self._camera_paused_until}
+
+        if cmd == "resume_camera":
+            was = self._camera_paused_until
+            self._camera_paused_until = 0.0
+            log.info("camera lease cleared (was until %s)", was)
+            return {"ok": True}
+
+        if cmd == "build_enrollment":
+            try:
+                from .config import ENROLL_DIR
+                n = self.recog.enroll_from_dir(ENROLL_DIR)
+                return {"ok": True, "count": n}
+            except Exception as e:
+                log.exception("build_enrollment failed")
+                return {"ok": False, "reason": str(e)}
 
         if cmd == "verify":
             ok, dist, real = self._capture_and_verify()
@@ -144,7 +274,7 @@ class FaceService:
 
         if cmd == "presence":
             present, real = self._presence_probe()
-            return {"ok": True, "present": present, "real": real}
+            return {"ok": True, "present": present, "real": real, "mode": self.cfg.presence_mode}
 
         if cmd == "unlock":
             ok, dist, real = self._capture_and_verify()
@@ -250,6 +380,10 @@ class FaceService:
             except Exception:
                 log.exception("pipe error")
                 time.sleep(0.5)
+
+        log.info("FaceService stopped")
+        with self._cam_lock:
+            self._release_camera()
 
     def stop(self) -> None:
         self._stop.set()

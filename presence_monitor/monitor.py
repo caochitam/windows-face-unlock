@@ -3,6 +3,7 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass, field
 
 import ctypes
 import pywintypes  # type: ignore
@@ -32,7 +33,7 @@ def _get_idle_seconds() -> float:
     return (tick - lii.dwTime) / 1000.0
 
 
-def _pipe_call(req: dict, timeout_s: float = 30.0) -> dict | None:
+def pipe_call(req: dict, timeout_s: float = 30.0) -> dict | None:
     """Send a JSON request to the FaceService pipe and return the response."""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -63,12 +64,28 @@ def _pipe_call(req: dict, timeout_s: float = 30.0) -> dict | None:
             pass
 
 
+# Backwards-compat alias
+_pipe_call = pipe_call
+
+
+@dataclass
+class TickSnapshot:
+    at: float = 0.0
+    result: str = "-"       # present / absent / skipped / error
+    reason: str = ""
+    strikes: int = 0
+    mode: str = ""
+
+
 class PresenceMonitor:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._strikes = 0
+        self._last = TickSnapshot()
+        self._lock_count = 0
+        self._state_lock = threading.Lock()
 
     def pause(self) -> None:
         self._paused.set()
@@ -85,9 +102,44 @@ class PresenceMonitor:
     def stop(self) -> None:
         self._stop.set()
 
+    def reload_config(self, cfg: Config) -> None:
+        self.cfg = cfg
+        self._strikes = 0
+        log.info(
+            "presence monitor config reloaded: interval=%ss strikes=%s mode=%s",
+            cfg.presence_interval_s, cfg.presence_absent_strikes, cfg.presence_mode,
+        )
+
+    def snapshot(self) -> dict:
+        with self._state_lock:
+            last = self._last
+            return {
+                "paused": self._paused.is_set(),
+                "strikes": self._strikes,
+                "lock_count": self._lock_count,
+                "last_at": last.at,
+                "last_result": last.result,
+                "last_reason": last.reason,
+                "last_mode": last.mode,
+                "interval_s": self.cfg.presence_interval_s,
+                "absent_strikes": self.cfg.presence_absent_strikes,
+                "mode": self.cfg.presence_mode,
+            }
+
+    def _set_last(self, result: str, reason: str = "", mode: str = "") -> None:
+        with self._state_lock:
+            self._last = TickSnapshot(
+                at=time.time(),
+                result=result,
+                reason=reason,
+                strikes=self._strikes,
+                mode=mode or self.cfg.presence_mode,
+            )
+
     def _tick(self) -> None:
         # 1. Skip if paused from the tray
         if self._paused.is_set():
+            self._set_last("skipped", "paused")
             return
 
         # 2. Skip if this is a remote session — face check doesn't make sense
@@ -96,6 +148,7 @@ class PresenceMonitor:
         if remote:
             log.info("skip: remote context (%s)", reason)
             self._strikes = 0
+            self._set_last("skipped", reason)
             return
 
         # NOTE: We deliberately do NOT skip based on keyboard/mouse input.
@@ -104,33 +157,43 @@ class PresenceMonitor:
         # using the machine (stronger "walk-away" security).
 
         # 3. Probe camera via FaceService
-        resp = _pipe_call({"cmd": "presence"}, timeout_s=20.0)
+        resp = pipe_call({"cmd": "presence"}, timeout_s=20.0)
         if resp is None:
             # Service down — don't lock blindly
             log.warning("presence probe: service unavailable; skipping")
+            self._set_last("error", "service-unavailable")
             return
 
         present = bool(resp.get("present"))
-        log.info("presence probe: present=%s real=%s", present, resp.get("real"))
+        mode = resp.get("mode", self.cfg.presence_mode)
+        log.info("presence probe: present=%s real=%s mode=%s",
+                 present, resp.get("real"), mode)
 
         if present:
             self._strikes = 0
+            self._set_last("present", f"real={resp.get('real')}", mode)
             return
 
         self._strikes += 1
+        self._set_last("absent", f"strike {self._strikes}/{self.cfg.presence_absent_strikes}", mode)
         if self._strikes >= self.cfg.presence_absent_strikes:
             log.warning("absent %d ticks — locking workstation", self._strikes)
             self._strikes = 0
+            with self._state_lock:
+                self._lock_count += 1
             _lock_workstation()
 
     def run(self) -> None:
-        log.info("presence monitor loop: interval=%ss strikes=%s",
-                 self.cfg.presence_interval_s, self.cfg.presence_absent_strikes)
+        log.info("presence monitor loop: interval=%ss strikes=%s mode=%s",
+                 self.cfg.presence_interval_s,
+                 self.cfg.presence_absent_strikes,
+                 self.cfg.presence_mode)
         while not self._stop.is_set():
             try:
                 self._tick()
             except Exception:
                 log.exception("tick error")
+                self._set_last("error", "exception")
             # wake up sooner if stop is signalled
             self._stop.wait(self.cfg.presence_interval_s)
 

@@ -28,3 +28,5 @@ weights/
 *.h5
 *.pth
 *.onnx
+# …but DO ship the bundled YuNet detector (small, opencv_zoo, Apache-2.0)
+!models/face_detection_yunet_2023mar.onnx
