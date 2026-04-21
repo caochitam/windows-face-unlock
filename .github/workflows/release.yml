@@ -1,0 +1,140 @@
+name: release
+
+# Builds and releases the Windows installer whenever a `v*` tag is pushed.
+# If the repo has configured the SIGNPATH_* secrets, the installer is
+# code-signed through SignPath.io's free open-source program. Otherwise
+# the unsigned installer is published directly (users will see a
+# SmartScreen "unknown publisher" prompt the first time they run it —
+# README documents how to bypass).
+#
+#     git tag v0.1.0
+#     git push origin v0.1.0
+# ...triggers this workflow.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create a GitHub Release
+
+jobs:
+  build:
+    name: Build + (optional) sign Windows installer
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      SIGNPATH_API_TOKEN:    ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORG_ID:       ${{ secrets.SIGNPATH_ORG_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install pyinstaller==6.11.1
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Sync installer + app version with tag
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v\d+\.\d+\.\d+') { $tag = "v0.0.0-${{ github.run_number }}" }
+          $ver = $tag.TrimStart('v')
+          Write-Host "Stamping app + installer with version $ver"
+          (Get-Content face_service\_version.py) -replace '(__version__\s*=\s*")[^"]+(")', "`$1$ver`$2" | Set-Content face_service\_version.py
+          (Get-Content installer\installer.iss) -replace '(#define MyAppVersion ")[^"]+(")', "`$1$ver`$2" | Set-Content installer\installer.iss
+
+      - name: Pre-download model weights
+        shell: powershell
+        run: python installer\download_weights.py
+
+      - name: Build Credential Provider DLL
+        shell: powershell
+        continue-on-error: true
+        run: |
+          cd credential_provider
+          cmake -B build -A x64 -G "Visual Studio 17 2022"
+          cmake --build build --config Release
+
+      - name: Build installer (PyInstaller + Inno Setup)
+        shell: powershell
+        run: python installer\build.py
+
+      - name: Detect SignPath config
+        id: signcheck
+        shell: powershell
+        run: |
+          if ($env:SIGNPATH_API_TOKEN -and $env:SIGNPATH_ORG_ID -and $env:SIGNPATH_PROJECT_SLUG) {
+            "have_signpath=true"  | Out-File -Append $env:GITHUB_OUTPUT
+            Write-Host "SignPath secrets detected — installer will be signed."
+          } else {
+            "have_signpath=false" | Out-File -Append $env:GITHUB_OUTPUT
+            Write-Host "SignPath secrets absent — publishing unsigned installer."
+          }
+
+      - name: Upload unsigned installer for SignPath
+        if: steps.signcheck.outputs.have_signpath == 'true'
+        id: upload_unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-unsigned
+          path: installer_output\WindowsFaceUnlock-Setup-*.exe
+          retention-days: 1
+
+      - name: Submit to SignPath
+        if: steps.signcheck.outputs.have_signpath == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload_unsigned.outputs.artifact-id }}
+          artifact-configuration-slug: installer
+          wait-for-completion: true
+          output-artifact-directory: installer_output
+
+      - name: Regenerate checksum (covers signed & unsigned)
+        shell: powershell
+        run: |
+          Get-ChildItem installer_output\WindowsFaceUnlock-Setup-*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content ($_.FullName + '.sha256') -Encoding ascii
+          }
+
+      - name: Collect artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            installer_output\WindowsFaceUnlock-Setup-*.exe
+            installer_output\WindowsFaceUnlock-Setup-*.exe.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer_output/WindowsFaceUnlock-Setup-*.exe
+            installer_output/WindowsFaceUnlock-Setup-*.exe.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

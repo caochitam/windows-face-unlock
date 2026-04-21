@@ -163,6 +163,20 @@ _EN: dict[str, str] = {
     "help.intro": "What each tray menu entry does:",
     "help.close": "Close",
 
+    # ---- Updater ----
+    "tray.check_update": "Check for updates…",
+    "tray.check_update.desc": "Ask GitHub whether a newer release is available and offer to install it.",
+    "update.title": "Windows Face Unlock — Update",
+    "update.checking": "Checking for updates…",
+    "update.up_to_date": "You're on the latest version ({v}).",
+    "update.available": "A new version is available: {latest} (you have {current}).\n\nRelease notes:\n{notes}\n\nDownload and install now? The installer will stop the service, replace the files, then restart.",
+    "update.downloading": "Downloading {name}…",
+    "update.download_failed": "Download failed: {err}",
+    "update.checksum_failed": "Checksum mismatch — the downloaded file does not match the published hash. Installation aborted.",
+    "update.launching": "Launching the installer. The tray will close in a moment.",
+    "update.check_failed": "Could not reach GitHub: {err}",
+    "update.no_asset": "Release {tag} has no Windows installer attached yet. Try again later.",
+
     # ---- Enrollment wizard ----
     "enroll.title": "Face Unlock — Enroll face",
     "enroll.guide.idle": "Centre your face in the frame. Capture will start automatically once a face is detected.",
@@ -303,6 +317,19 @@ _VI: dict[str, str] = {
     "help.title": "Face Unlock — Trợ giúp",
     "help.intro": "Ý nghĩa từng mục trong menu tray:",
     "help.close": "Đóng",
+
+    "tray.check_update": "Kiểm tra cập nhật…",
+    "tray.check_update.desc": "Hỏi GitHub xem có bản mới hay không và đề nghị cài.",
+    "update.title": "Windows Face Unlock — Cập nhật",
+    "update.checking": "Đang kiểm tra cập nhật…",
+    "update.up_to_date": "Bạn đang dùng bản mới nhất ({v}).",
+    "update.available": "Có bản mới: {latest} (bạn đang dùng {current}).\n\nRelease notes:\n{notes}\n\nTải về và cài ngay? Installer sẽ tự dừng service, ghi đè file, rồi khởi động lại.",
+    "update.downloading": "Đang tải {name}…",
+    "update.download_failed": "Tải thất bại: {err}",
+    "update.checksum_failed": "Checksum không khớp — file tải về không giống hash công bố. Đã hủy cài.",
+    "update.launching": "Đang khởi chạy installer. Tray sẽ đóng trong giây lát.",
+    "update.check_failed": "Không kết nối được GitHub: {err}",
+    "update.no_asset": "Release {tag} chưa có installer Windows đính kèm. Thử lại sau.",
 
     "enroll.title": "Face Unlock — Thu thập khuôn mặt",
     "enroll.guide.idle": "Đặt mặt vào giữa khung. Việc chụp sẽ tự động bắt đầu khi phát hiện khuôn mặt.",

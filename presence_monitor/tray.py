@@ -16,6 +16,7 @@ from face_service.i18n import LANGUAGES, get_language, set_language, t
 from .enroll_gui import open_enroll
 from .gui import open_help, open_settings, open_status
 from .monitor import PresenceMonitor, pipe_call
+from .updater import check_latest, current_version, download_and_launch
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ EMOJI = {
     "set_password": "🔑",
     "open_log":     "📄",
     "language":     "🌐",
+    "check_update": "⬆",
     "help":         "❓",
     "quit":         "⏻",
 }
@@ -145,6 +147,77 @@ def run_with_tray(cfg: Config) -> None:
             log.info("manual probe: %s", resp)
         threading.Thread(target=_probe, daemon=True).start()
 
+    def _update_notify(icon_obj, title: str, message: str) -> None:
+        try:
+            icon_obj.notify(message, title)
+        except Exception:
+            log.exception("tray.notify failed")
+
+    def _run_update_flow(interactive: bool = True) -> None:
+        """Background worker that checks GitHub and (optionally) installs.
+
+        interactive=True comes from a menu click → always show a dialog.
+        interactive=False is the startup auto-check → only notify on new version.
+        """
+        from tkinter import Tk, messagebox
+
+        release = check_latest(timeout=8.0)
+        current = current_version()
+
+        if release is None:
+            if interactive and icon_ref:
+                _update_notify(icon_ref[0], t("update.title"),
+                               t("update.check_failed", err="network"))
+            return
+
+        if not release.is_newer_than(current):
+            if interactive and icon_ref:
+                _update_notify(icon_ref[0], t("update.title"),
+                               t("update.up_to_date", v=current))
+            return
+
+        # Ask the user. Use a small Tk root we immediately destroy afterwards.
+        if icon_ref:
+            _update_notify(icon_ref[0], t("update.title"),
+                           t("update.up_to_date", v=release.tag))
+
+        root = Tk()
+        root.withdraw()
+        try:
+            notes = (release.body or "")[:600]
+            if messagebox.askyesno(
+                t("update.title"),
+                t("update.available", latest=release.tag,
+                  current=current, notes=notes),
+            ):
+                ok, msg = download_and_launch(release)
+                if ok:
+                    messagebox.showinfo(t("update.title"), msg)
+                    # Give the installer a moment, then leave — installer
+                    # will kill us anyway if needed.
+                    threading.Thread(target=lambda: (time.sleep(2),
+                                                     icon_ref[0].stop()
+                                                     if icon_ref else None),
+                                     daemon=True).start()
+                else:
+                    messagebox.showerror(t("update.title"), msg)
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def on_check_update(icon, item):
+        threading.Thread(target=lambda: _run_update_flow(interactive=True),
+                         name="update-check", daemon=True).start()
+
+    # Non-blocking auto-check on startup (silent if up to date).
+    def _startup_update_check():
+        time.sleep(30)  # let TF warm up first, don't hit GH immediately
+        _run_update_flow(interactive=False)
+    threading.Thread(target=_startup_update_check,
+                     name="update-startup", daemon=True).start()
+
     def _stop_service_process() -> None:
         """Best-effort shutdown of face_service, then kill survivors."""
         try:
@@ -231,6 +304,7 @@ def run_with_tray(cfg: Config) -> None:
         pystray.MenuItem(lbl("tray.open_log", "open_log"), on_open_log),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lbl("tray.language", "language"), language_submenu),
+        pystray.MenuItem(lbl("tray.check_update", "check_update"), on_check_update),
         pystray.MenuItem(lbl("tray.help", "help"), on_help),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lbl("tray.quit", "quit"), on_quit),

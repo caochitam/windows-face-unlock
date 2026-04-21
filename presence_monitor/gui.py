@@ -347,6 +347,7 @@ HELP_ENTRIES = [
     ("tray.set_password", "tray.set_password.desc"),
     ("tray.open_log", "tray.open_log.desc"),
     ("tray.language", "tray.language.desc"),
+    ("tray.check_update", "tray.check_update.desc"),
     ("tray.help", "tray.help.desc"),
     ("tray.quit", "tray.quit.desc"),
 ]

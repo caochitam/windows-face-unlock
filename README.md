@@ -39,6 +39,26 @@ when away, presence monitor, walk-away lock, face id for pc.*
   from the tray, applies live.
 - **DPAPI-encrypted** Windows password storage (user scope).
 
+## Install (end user)
+
+Grab the latest installer from the
+[**Releases page**](https://github.com/caochitam/windows-face-unlock/releases)
+and double-click it. Requires Windows 10/11 x64, admin rights, any webcam.
+
+- ~350–500 MB installer — it bundles Python, TensorFlow CPU, PyTorch CPU,
+  DeepFace, OpenCV, YuNet + MiniFASNet models. No other downloads.
+- Not yet code-signed, so SmartScreen will say **"Unknown publisher"**.
+  Click **More info → Run anyway**. Signing application to SignPath is in
+  progress — when approved the signed installer will replace unsigned.
+- On first launch, open the tray icon → **Enroll face** and capture ~15
+  photos, then **Set Windows password** to enable lock-screen unlock.
+- Updates are checked automatically against GitHub Releases; a prompt
+  appears when a new version is available. You can also trigger a check
+  from the tray menu (*Check for updates…*).
+
+Building the installer from source: see
+[`installer/README.md`](installer/README.md).
+
 ## Architecture
 
 An open-source, auditable replacement for closed-source webcam-login utilities
