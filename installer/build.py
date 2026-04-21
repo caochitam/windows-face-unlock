@@ -106,10 +106,15 @@ def _find_iscc() -> str:
     env = os.environ.get("INNO_SETUP_ISCC")
     if env and Path(env).exists():
         return env
-    for candidate in (
+    candidates = [
         r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         r"C:\Program Files\Inno Setup 6\ISCC.exe",
-    ):
+    ]
+    # winget installs Inno Setup to the user profile by default.
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(str(Path(local_appdata) / "Programs" / "Inno Setup 6" / "ISCC.exe"))
+    for candidate in candidates:
         if Path(candidate).exists():
             return candidate
     exe = shutil.which("iscc") or shutil.which("ISCC")
