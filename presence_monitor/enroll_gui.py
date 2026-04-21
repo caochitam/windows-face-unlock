@@ -452,8 +452,20 @@ class EnrollWindow:
         self._set_guide("enroll.guide.idle")
 
     def _on_close(self) -> None:
+        # Signal the camera thread first and WAIT for it to release the
+        # webcam before we tear down Tk. Skipping the join would let the
+        # daemon thread get cut mid-read(), which on Windows DirectShow
+        # leaks the camera handle and wedges the whole service until a
+        # full process restart (we hit this in production 2026-04-21).
         self._stop.set()
         self._capture_armed.clear()
+        t_cam = self._cam_thread
+        if t_cam is not None and t_cam.is_alive():
+            # cv2.VideoCapture.read() blocks up to ~30 ms per frame, so
+            # a 3 s budget is generous but still bounded.
+            t_cam.join(timeout=3.0)
+            if t_cam.is_alive():
+                log.warning("enroll camera thread did not exit within 3s")
         try:
             self.root.destroy()
         except Exception:
