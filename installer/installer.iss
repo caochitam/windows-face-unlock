@@ -35,13 +35,15 @@ ArchitecturesInstallIn64BitMode=x64
 ArchitecturesAllowed=x64
 PrivilegesRequired=admin
 CloseApplications=yes
-RestartApplicationsAfterUpdate=yes
+RestartApplications=yes
 UsePreviousAppDir=yes
 UsePreviousTasks=yes
 
 [Languages]
+; Inno Setup 6 ships only Default.isl (English) out of the box. The app
+; itself is fully translated into 12 languages at runtime — the installer
+; wizard stays English for simplicity.
 Name: "english";  MessagesFile: "compiler:Default.isl"
-Name: "vietnam";  MessagesFile: "compiler:Languages\Vietnamese.isl"
 
 [Tasks]
 Name: "cp"; Description: "Register the Credential Provider (enables log-in with your face)"; \
