@@ -73,12 +73,12 @@ IFACEMETHODIMP FaceCredentialProvider::GetFieldDescriptorAt(DWORD dwIndex,
 IFACEMETHODIMP FaceCredentialProvider::GetCredentialCount(DWORD* pdwCount, DWORD* pdwDefault,
                                                           BOOL* pbAutoLogonWithDefault) {
     *pdwCount = m_pCred ? 1 : 0;
-    // Make our face tile the default and trigger auto-verify the moment the
-    // lock/login screen becomes visible. If face recognition fails, our
-    // GetSerialization returns S_FALSE, which leaves LogonUI idle so the user
-    // can click the password tile or re-trigger with the arrow.
+    // Face tile is default but does NOT auto-fire when the lock screen
+    // appears. Camera scan only triggers when the user explicitly clicks the
+    // submit arrow — saving wear on the camera and avoiding false-attempt
+    // counters from racking up while the workstation sits idle.
     *pdwDefault = 0;
-    *pbAutoLogonWithDefault = TRUE;
+    *pbAutoLogonWithDefault = FALSE;
     return S_OK;
 }
 

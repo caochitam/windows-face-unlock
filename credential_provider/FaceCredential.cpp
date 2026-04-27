@@ -50,13 +50,12 @@ IFACEMETHODIMP FaceCredential::UnAdvise() {
 }
 
 IFACEMETHODIMP FaceCredential::SetSelected(BOOL* pbAutoLogon) {
-    // Trigger verification as soon as the tile is selected — including the
-    // implicit auto-selection from GetCredentialCount's pbAutoLogonWithDefault.
-    // Safety: GetSerialization has a 12-second hard timeout and returns S_FALSE
-    // on failure, so a bad attempt won't prevent the user from switching to
-    // the password tile.
-    *pbAutoLogon = TRUE;
-    m_status = L"Look at the camera";
+    // Do NOT auto-trigger verification when the tile becomes selected.
+    // The user must press the submit arrow to start a scan — this prevents
+    // continuous re-scanning whenever the lock screen redraws or the tile
+    // is re-selected, and gives the user explicit control over each attempt.
+    *pbAutoLogon = FALSE;
+    m_status = L"Press the arrow to scan your face";
     if (m_pEvents) m_pEvents->SetFieldString(this, FIELD_STATUS, m_status.c_str());
     return S_OK;
 }
